@@ -7,6 +7,9 @@
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+
 
   <style>
     :root { color-scheme: dark; }
@@ -205,13 +208,21 @@
           </div>
 
           <!-- ✅ DATE RANGE (replaces Search) -->
-          <div class="md:col-span-1">
-            <label class="text-xs text-slate-400">Date Range</label>
-            <div class="mt-1 grid grid-cols-1 gap-2">
-              <input id="rangeFrom" type="date" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 outline-none text-sm" />
-              <input id="rangeTo" type="date" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 outline-none text-sm" />
-            </div>
-          </div>
+          <!-- ✅ DATE RANGE (single picker like your screenshot) -->
+<div class="md:col-span-1">
+  <label class="text-xs text-slate-400">Date Range</label>
+
+  <!-- visible range picker -->
+  <input id="dateRange"
+    placeholder="YYYY/MM/DD - YYYY/MM/DD"
+    class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 outline-none text-sm"
+    readonly />
+
+  <!-- keep your existing ids (hidden) so we don't break logic -->
+  <input id="rangeFrom" type="hidden" />
+  <input id="rangeTo" type="hidden" />
+</div>
+
 
           <div class="md:col-span-1 flex gap-2 items-end">
             <button id="refreshBtn" class="w-1/2 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700">Refresh</button>
@@ -1245,18 +1256,25 @@ async function refreshFiltersOnly(){
 
   let out = rows;
 
-  // ✅ Vendor history mode: show all dates (or range) for the selected vendor
-  if (dataset === "vendor" && vendorHistoryVendor) {
-    out = out.filter(r => String(r["Vendor"]||"").trim() === vendorHistoryVendor);
+    // ✅ If date range is set, ALWAYS filter by range (normal mode + vendor history mode)
+  if (from || to) {
+    out = out.filter(r => inRange(r.__date, from, to));
 
-    // apply range if set, else all dates
-    if (from || to) out = out.filter(r => inRange(r.__date, from, to));
+    // if vendorHistoryVendor is set, also filter by vendor name
+    if (dataset === "vendor" && vendorHistoryVendor) {
+      out = out.filter(r => String(r["Vendor"]||"").trim() === vendorHistoryVendor);
+    }
 
-    // optional: if no range set, keep all dates; ignore single-date filter
   } else {
-    // normal mode uses single date
-    if (date) out = out.filter(r => r.__date === date);
+    // no range → old behavior (single date)
+    if (dataset === "vendor" && vendorHistoryVendor) {
+      out = out.filter(r => String(r["Vendor"]||"").trim() === vendorHistoryVendor);
+      // no single-date filter in history mode
+    } else {
+      if (date) out = out.filter(r => r.__date === date);
+    }
   }
+
 
   // status filters only in vendor dataset (normal mode + history mode)
   if (dataset === "vendor") {
@@ -1584,6 +1602,31 @@ function initControls() {
   ].join("");
 
   setDatasetButtons();
+
+    // ✅ Flatpickr single Date Range picker
+  const rangeEl = $("dateRange");
+  if (rangeEl && window.flatpickr) {
+    flatpickr(rangeEl, {
+      mode: "range",
+      dateFormat: "Y-m-d",
+      allowInput: false,
+      onClose: async (selectedDates) => {
+        // selectedDates = [fromDate, toDate]
+        const from = selectedDates[0] ? msToDate(selectedDates[0].getTime()) : "";
+        const to = selectedDates[1] ? msToDate(selectedDates[1].getTime()) : (from || "");
+
+        $("rangeFrom").value = from;
+        $("rangeTo").value = to;
+
+        // keep your dashboard "Date" usable (cards/chart/top vendors)
+        // we set it to the END of range
+        if (to) $("dateSelect").value = to;
+
+        await refreshFiltersOnly();
+      }
+    });
+  }
+
 
   $("btnDaily").addEventListener("click", async () => {
     currentDataset = "daily";
