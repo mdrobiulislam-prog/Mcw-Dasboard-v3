@@ -514,12 +514,16 @@ function msToDate(ms){
  * ========================================================= */
 function normKey(s){
   return String(s ?? "")
-    .replace(/^\uFEFF/, "")            // BOM
+    .replace(/^\uFEFF/, "")                 // BOM
+    .replace(/[\u00A0]/g, " ")              // NBSP
+    .replace(/[\u2000-\u200B]/g, " ")       // thin/zero-width spaces
+    .replace(/[\u202F\u205F\u3000]/g, " ")  // narrow no-break / ideographic spaces
     .trim()
-    .replace(/\s+/g, " ")             // collapse spaces
-    .replace(/[^\w%\/\.\- ]+/g, "")   // remove weird chars
+    .replace(/\s+/g, " ")                   // collapse spaces
+    .replace(/[^\w%\/\.\- ]+/g, "")         // remove weird chars
     .toLowerCase();
 }
+
 
 function buildHeaderAliasMap(dataset){
   const std = dataset === "daily" ? DAILY_STD : VENDOR_STD;
