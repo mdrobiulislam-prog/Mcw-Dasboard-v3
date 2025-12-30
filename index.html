@@ -713,15 +713,39 @@ function canonicalizeGrid(grid, dataset){
   const headers = [...std];
 
   // Build canonical rows starting AFTER the detected header row
-  const rows = grid.slice(headerRowIndex + 1).map(r => {
-    const obj = {};
-    headers.forEach(h => {
-      const idx = indexByStd.get(h);
-      obj[h] = (idx != null ? (r[idx] ?? "") : "").toString().trim();
-    });
-    obj.__date = normalizeDate(obj["Date"]);
-    return obj;
+ const rows = grid.slice(headerRowIndex + 1).map(r => {
+  const obj = {};
+  headers.forEach(h => {
+    const idx = indexByStd.get(h);
+    obj[h] = (idx != null ? (r[idx] ?? "") : "").toString().trim();
   });
+
+  // ✅ Normalize date
+  obj.__date = normalizeDate(obj["Date"]);
+
+  // ✅ FIX: If Turnover column header is not detected, derive it from Deposit × Turnover x
+  if (dataset === "daily") {
+    const dep = toNumber(obj["Deposit"]);
+    const tx  = toNumber(obj["Turnover x"]);
+    const trn = toNumber(obj["Turnover"]);
+
+    // If Turnover missing/0 but we have Deposit + Turnover x → calculate Turnover
+    if ((!trn || trn === 0) && dep > 0 && tx > 0) {
+      const calc = dep * tx;
+      obj["Turnover"] = fmtMoney(calc); // shows like ৳1,875,008,138.37
+    }
+
+    // (Optional safety) If Turnover x missing but Turnover exists → calculate Turnover x
+    const trn2 = toNumber(obj["Turnover"]);
+    const tx2  = toNumber(obj["Turnover x"]);
+    if ((!tx2 || tx2 === 0) && dep > 0 && trn2 > 0) {
+      obj["Turnover x"] = (trn2 / dep).toFixed(3);
+    }
+  }
+
+  return obj;
+});
+
 
   return { headers, rows };
 }
