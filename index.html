@@ -550,6 +550,12 @@ function buildHeaderAliasMap(dataset){
     "1st depositors": "1st Depositors",
     "regusers": "Reg Users",
     "reg users": "Reg Users",
+        "turn over": "Turnover",
+    "turnover amount": "Turnover",
+    "turnover (৳)": "Turnover",
+    "total turnover": "Turnover",
+    "turnover value": "Turnover",
+
 
     // =====================
     // Vendor (MORE ROBUST)
@@ -667,10 +673,40 @@ function canonicalizeGrid(grid, dataset){
 
   const indexByStd = new Map();
 
+  // 1) First pass: exact alias match
   rawHeaders.forEach((h, idx) => {
     const nk = normKey(h);
     const canon = aliasMap.get(nk);
     if (canon && !indexByStd.has(canon)) indexByStd.set(canon, idx);
+  });
+
+  // 2) ✅ Heuristic pass (THIS FIXES YOUR TURNOVER ISSUE)
+  // If a sheet has "Turnover Amount" or "Turnover (৳)" etc, we still map it.
+  rawHeaders.forEach((h, idx) => {
+    const nk = normKey(h);
+
+    // Daily KPI heuristics
+    if (dataset === "daily") {
+      // Turnover x
+      if (!indexByStd.has("Turnover x") && nk.includes("turnover") && (nk.includes("x") || nk.includes("mult") || nk.includes("multiple"))) {
+        indexByStd.set("Turnover x", idx);
+      }
+
+      // Turnover (main) — must not steal Turnover x
+      if (!indexByStd.has("Turnover") && nk.includes("turnover") && !nk.includes("x") && !nk.includes("mult") && !nk.includes("multiple")) {
+        indexByStd.set("Turnover", idx);
+      }
+
+      // Company Win variations
+      if (!indexByStd.has("Company Win") && (nk.includes("company") && nk.includes("win"))) {
+        indexByStd.set("Company Win", idx);
+      }
+
+      // Net Cash variations
+      if (!indexByStd.has("Net Cash") && (nk.includes("net") && nk.includes("cash"))) {
+        indexByStd.set("Net Cash", idx);
+      }
+    }
   });
 
   // Build canonical headers in correct order (std)
