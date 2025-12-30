@@ -322,7 +322,7 @@
           </div>
         </div>
       </div>
-      <!-- ✅ KPI Funnel (Traffic → Profit) -->
+      <!-- ✅ KPI Funnel (Traffic -> Profit) -->
 <div class="mt-4 bg-slate-950 border border-slate-800 rounded-2xl p-4">
   <div class="text-sm font-semibold mb-2">KPI Funnel</div>
 
@@ -330,6 +330,7 @@
     <!-- JS will inject cards here -->
   </div>
 </div>
+
 
       <!-- Vendor action center -->
       <div id="vendorOptions" class="hidden bg-slate-900/50 border border-slate-800 rounded-2xl p-4 mb-5">
@@ -1787,6 +1788,7 @@ function setDatasetButtons() {
     $("btnDaily").className = "flex-1 px-3 py-2 rounded-xl border border-slate-800 bg-slate-950 font-medium";
     $("vendorOptions").classList.remove("hidden");
     $("dailyOptions").classList.add("hidden");
+    $("kpiFunnelWrap")?.classList.toggle("hidden", dailyView !== "snapshot");
   }
 }
 
@@ -1799,6 +1801,7 @@ function setDailyViewButtons(){
     $("viewTrend").className = "px-3 py-2 rounded-xl bg-indigo-600 text-sm font-medium";
     $("viewSnapshot").className = "px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm font-medium";
     $("trendControls").classList.remove("hidden");
+    $("kpiFunnelWrap")?.classList.toggle("hidden", dailyView !== "snapshot");
   }
 
   document.querySelectorAll(".trendRange").forEach(b=>{
