@@ -997,6 +997,9 @@ function renderTable(headers, rows) {
   /** =========================================================
  * KPI FUNNEL (Daily)
  * ========================================================= */
+/** =========================================================
+ * KPI FUNNEL (Daily + Vendor)
+ * ========================================================= */
 function funnelCard(title, value, sub="") {
   return `
     <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
@@ -1006,6 +1009,87 @@ function funnelCard(title, value, sub="") {
     </div>
   `;
 }
+
+function renderFunnelCards(items){
+  const wrap = document.getElementById("funnelCards");
+  if (!wrap) return;
+  wrap.innerHTML = (items || []).map(x => funnelCard(x.label, x.value, x.sub)).join("");
+}
+
+function renderFunnel(allRows, selectedDate, brandKey) {
+  const wrap = document.getElementById("funnelCards");
+  if (!wrap) return;
+
+  if (!selectedDate) { wrap.innerHTML = ""; return; }
+
+  // =========================
+  // DAILY FUNNEL
+  // =========================
+  if (currentDataset === "daily") {
+    const dayRows = (allRows || []).filter(r => r.__date === selectedDate);
+
+    let reg = 0, fd = 0, dep = 0, trn = 0, win = 0;
+
+    if (brandKey === "ALL") {
+      const agg = calcDailyRowAggregate(dayRows);
+      reg = agg.reg; fd = agg.fd; dep = agg.dep; trn = agg.trn; win = agg.win;
+    } else {
+      const r = dayRows[0] || null;
+      reg = r ? toNumber(r["Reg Users"]) : 0;
+      fd  = r ? toNumber(r["1st Depositors"]) : 0;
+      dep = r ? toNumber(r["Deposit"]) : 0;
+      trn = r ? toNumber(r["Turnover"]) : 0;
+      win = r ? toNumber(r["Company Win"]) : 0;
+    }
+
+    const conv = reg ? (fd / reg) * 100 : 0;
+    const depPerFD = fd ? dep / fd : 0;
+    const tx = dep ? trn / dep : 0;
+    const margin = trn ? (win / trn) * 100 : 0;
+
+    renderFunnelCards([
+      { label:"Reg Users", value: fmtNumber(reg), sub:"Traffic" },
+      { label:"1st Depositors", value: fmtNumber(fd), sub:`Conv: ${conv.toFixed(2)}%` },
+      { label:"Deposit", value: fmtMoney(dep), sub: fd ? `Avg/FD: ${fmtMoney(depPerFD).replace("৳৳","৳")}` : "" },
+      { label:"Turnover", value: fmtMoney(trn), sub: dep ? `Turnover x: ${tx.toFixed(3)}` : "" },
+      { label:"Company Win", value: fmtMoney(win), sub: trn ? `Margin: ${margin.toFixed(2)}%` : "" },
+    ]);
+
+    return;
+  }
+
+  // =========================
+  // VENDOR FUNNEL ✅
+  // =========================
+  if (currentDataset === "vendor") {
+    const dayRows = (allRows || []).filter(r => r.__date === selectedDate);
+
+    const vendors = dayRows.length;
+    const totalPlayers = dayRows.reduce((s,r)=> s + toNumber(r["Players"]), 0);
+    const totalStake   = dayRows.reduce((s,r)=> s + toNumber(r["Stake"]), 0);
+    const totalWL      = dayRows.reduce((s,r)=> s + toNumber(r["Win/Loss"]), 0);
+
+    const dangerous = dayRows.filter(r => String(r["Status"]||"").toLowerCase().includes("danger")).length;
+    const risky     = dayRows.filter(r => String(r["Status"]||"").toLowerCase().includes("risky")).length;
+    const normal    = dayRows.filter(r => String(r["Status"]||"").toLowerCase().includes("normal")).length;
+    const healthy   = dayRows.filter(r => String(r["Status"]||"").toLowerCase().includes("healthy")).length;
+
+    const avgLossPct = vendors ? (dayRows.reduce((s,r)=> s + toNumber(r["Loss %"]), 0) / vendors) : 0;
+
+    renderFunnelCards([
+      { label:"Vendors", value: fmtNumber(vendors), sub:"Selected date" },
+      { label:"Players", value: fmtNumber(totalPlayers), sub:"Sum players" },
+      { label:"Stake", value: fmtMoney(totalStake), sub:"Sum stake" },
+      { label:"Win/Loss", value: fmtMoney(totalWL), sub:`Avg Loss%: ${avgLossPct.toFixed(2)}%` },
+      { label:"Risk Split", value: `${dangerous}/${risky}/${normal}/${healthy}`, sub:"D/R/N/H" },
+    ]);
+
+    return;
+  }
+
+  wrap.innerHTML = "";
+}
+
 
 function renderFunnel(allRows, selectedDate, brandKey) {
   const wrap = document.getElementById("funnelCards");
@@ -1158,7 +1242,6 @@ function applyVendorModalFilterSort(allRows){
     if (sort==="playersDesc") return players(b)-players(a);
     return 0;
   });
-renderFunnelCards(buildVendorFunnelFromRows(rows));
   return rows;
 }
 
