@@ -1112,6 +1112,24 @@ function renderVendorModalTable(rows){
     </tbody>
   `;
 }
+function buildVendorFunnelFromRows(rows){
+  const safe = Array.isArray(rows) ? rows : [];
+
+  const vendors = safe.length;
+  const totalPlayers = safe.reduce((s,r)=> s + Number(r["Players"] || 0), 0);
+  const totalStake = safe.reduce((s,r)=> s + Number(r["Stake"] || 0), 0);
+  const totalWinLoss = safe.reduce((s,r)=> s + Number(r["Win/Loss"] || 0), 0);
+
+  const dangerous = safe.filter(r => String(r["Status"] || "").toLowerCase() === "dangerous").length;
+
+  return [
+    { label:"Vendors", value: vendors, sub:"rows loaded" },
+    { label:"Players", value: fmtMoney(totalPlayers), sub:"sum players" },
+    { label:"Stake", value: "৳" + fmtMoney(totalStake), sub:"sum stake" },
+    { label:"Win/Loss", value: "৳" + fmtMoney(totalWinLoss), sub:"sum win/loss" },
+    { label:"Dangerous", value: dangerous, sub:"flagged" }
+  ];
+}
 
 function applyVendorModalFilterSort(allRows){
   const q = $("vendorModalSearch").value.trim().toLowerCase();
@@ -1140,7 +1158,7 @@ function applyVendorModalFilterSort(allRows){
     if (sort==="playersDesc") return players(b)-players(a);
     return 0;
   });
-
+renderFunnelCards(buildVendorFunnelFromRows(rows));
   return rows;
 }
 
