@@ -160,6 +160,48 @@
       </div>
     </div>
 
+    <!-- Vendor History Modal -->
+<div id="vendorModal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50">
+  <div class="max-w-6xl mx-auto mt-16 bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xl">
+    <div class="flex items-center justify-between gap-3">
+      <div>
+        <div class="text-lg font-semibold" id="vendorModalTitle">Vendor History</div>
+        <div class="text-xs text-slate-400" id="vendorModalMeta">—</div>
+      </div>
+      <button id="vendorModalClose" class="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800">✕ Close</button>
+    </div>
+
+    <div class="mt-4 flex flex-col md:flex-row gap-3 md:items-end">
+      <div class="flex-1">
+        <label class="text-xs text-slate-400">Filter inside vendor history</label>
+        <input id="vendorModalSearch" placeholder="Search in history (date / type / status / notes...)"
+          class="mt-1 w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 outline-none" />
+      </div>
+
+      <div class="w-full md:w-56">
+        <label class="text-xs text-slate-400">Sort by</label>
+        <select id="vendorModalSort" class="mt-1 w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 outline-none">
+          <option value="dateDesc">Date (Newest)</option>
+          <option value="dateAsc">Date (Oldest)</option>
+          <option value="stakeDesc">Stake (High)</option>
+          <option value="lossPctDesc">Loss % (High)</option>
+          <option value="absWLDesc">Abs Win/Loss (High)</option>
+          <option value="playersDesc">Players (High)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="mt-4 overflow-auto rounded-xl border border-slate-800">
+      <table class="min-w-full text-sm" id="vendorModalTable"></table>
+    </div>
+
+    <div class="mt-3 text-xs text-slate-500">
+      Tip: This shows the vendor across <b>all dates</b> from the same brand’s Vendor Monitor CSV.
+    </div>
+  </div>
+</div>
+
+
     <!-- APP -->
     <div id="app" class="hidden">
 
@@ -398,6 +440,9 @@ let chartInstance = null;
 let currentHeaders = [];
 let filteredRows = [];
 let lastFetchedData = null; // {headers, rows, brandKey, dataset}
+  let vendorHistoryCache = new Map(); // brandKey -> full vendor rows (all dates)
+let activeVendorName = "";
+
 
 /** vendor chips */
 const VENDOR_STATUSES = ["All","Dangerous","Risky","Normal","Healthy"];
@@ -949,6 +994,15 @@ function renderTable(headers, rows) {
     return `<tr class="odd:bg-slate-950/40 hover:bg-slate-800/30">
       ${headers.map(h => {
         const val = r[h] ?? "";
+        // ✅ Vendor clickable in vendor dataset
+if (currentDataset === "vendor" && h === "Vendor") {
+  const v = String(val || "").trim();
+  return `<td class="px-3 py-2 border-b border-slate-900">
+    <button class="vendorLink text-indigo-300 hover:text-indigo-200 underline underline-offset-2"
+      data-vendor="${v.replace(/"/g,'&quot;')}">${v || "—"}</button>
+  </td>`;
+}
+
         if (currentDataset === "vendor" && h.toLowerCase() === "status") {
           return `<td class="px-3 py-2 border-b border-slate-900">${badgeStatus(val)}</td>`;
         }
@@ -959,6 +1013,17 @@ function renderTable(headers, rows) {
 
   table.innerHTML = head + `<tbody>${bodyRows}</tbody>`;
 }
+  function renderTable(headers, rows) {
+  ...
+  table.innerHTML = head + `<tbody>${bodyRows}</tbody>`;
+}
+
+// ✅ PASTE THE NEW BLOCK HERE (vendor modal functions)
+function openVendorModal(){
+  ...
+}
+...
+
 
 function renderChartDailySnapshot(rows, selectedDate, brandKey) {
   const ctx = $("mainChart").getContext("2d");
@@ -1257,7 +1322,11 @@ function renderTopVendors(dayRows) {
     <tbody>
       ${top.map(r=>`
         <tr class="odd:bg-slate-950/40 hover:bg-slate-800/30">
-          <td class="px-3 py-2 border-b border-slate-900">${r["Vendor"]||"—"}</td>
+          <td class="px-3 py-2 border-b border-slate-900">
+  <button class="vendorLink text-indigo-300 hover:text-indigo-200 underline underline-offset-2"
+    data-vendor="${String(r["Vendor"]||"").replace(/"/g,'&quot;')}">${r["Vendor"]||"—"}</button>
+</td>
+
           <td class="px-3 py-2 border-b border-slate-900">${r["Game Type"]||"—"}</td>
           <td class="px-3 py-2 border-b border-slate-900 whitespace-nowrap">${r["Stake"]||"—"}</td>
           <td class="px-3 py-2 border-b border-slate-900 whitespace-nowrap">${r["Win/Loss"]||"—"}</td>
@@ -1697,12 +1766,17 @@ function initControls() {
   });
 
   $("brandSelect").addEventListener("change", async () => {
-    $("searchBox").value = "";
-    vendorCardFilter = "All";
-    vendorStatusFilter = "All";
-    renderVendorChips();
-    await loadAndRender(false);
-  });
+
+  // ✅ STEP 5: clear vendor history when brand changes
+  vendorHistoryCache.clear();
+
+  $("searchBox").value = "";
+  vendorCardFilter = "All";
+  vendorStatusFilter = "All";
+  renderVendorChips();
+  await loadAndRender(false);
+});
+
 
   $("dateSelect").addEventListener("change", async () => {
     await refreshFiltersOnly();
