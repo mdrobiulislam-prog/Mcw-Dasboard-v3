@@ -323,7 +323,7 @@
         </div>
       </div>
       <!-- ✅ KPI Funnel (Traffic -> Profit) -->
-<div class="mt-4 bg-slate-950 border border-slate-800 rounded-2xl p-4">
+<div id="kpiFunnelWrap" class="mt-4 bg-slate-950 border border-slate-800 rounded-2xl p-4">
   <div class="text-sm font-semibold mb-2">KPI Funnel</div>
 
   <div id="funnelCards" class="grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -1090,17 +1090,6 @@ function renderFunnel(allRows, selectedDate, brandKey) {
   wrap.innerHTML = "";
 }
 
-
-function renderFunnel(allRows, selectedDate, brandKey) {
-  const wrap = document.getElementById("funnelCards");
-  if (!wrap) return;
-
-  // Only show in Daily dataset and when date is selected
-  if (currentDataset !== "daily" || !selectedDate) {
-    wrap.innerHTML = "";
-    return;
-  }
-
   // pick rows for the selected date
   const dayRows = allRows.filter(r => r.__date === selectedDate);
 
@@ -1195,24 +1184,6 @@ function renderVendorModalTable(rows){
       `).join("")}
     </tbody>
   `;
-}
-function buildVendorFunnelFromRows(rows){
-  const safe = Array.isArray(rows) ? rows : [];
-
-  const vendors = safe.length;
-  const totalPlayers = safe.reduce((s,r)=> s + Number(r["Players"] || 0), 0);
-  const totalStake = safe.reduce((s,r)=> s + Number(r["Stake"] || 0), 0);
-  const totalWinLoss = safe.reduce((s,r)=> s + Number(r["Win/Loss"] || 0), 0);
-
-  const dangerous = safe.filter(r => String(r["Status"] || "").toLowerCase() === "dangerous").length;
-
-  return [
-    { label:"Vendors", value: vendors, sub:"rows loaded" },
-    { label:"Players", value: fmtMoney(totalPlayers), sub:"sum players" },
-    { label:"Stake", value: "৳" + fmtMoney(totalStake), sub:"sum stake" },
-    { label:"Win/Loss", value: "৳" + fmtMoney(totalWinLoss), sub:"sum win/loss" },
-    { label:"Dangerous", value: dangerous, sub:"flagged" }
-  ];
 }
 
 function applyVendorModalFilterSort(allRows){
