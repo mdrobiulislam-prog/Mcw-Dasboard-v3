@@ -330,6 +330,43 @@
         <div id="funnelCards" class="grid grid-cols-1 md:grid-cols-5 gap-3"></div>
       </div>
 
+      <!-- ✅ KPI Drilldown (click a funnel card to see last days trend) -->
+<div id="kpiDrillWrap" class="hidden mt-4 bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
+  <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+    <div>
+      <div class="text-sm font-semibold" id="kpiDrillTitle">KPI Trend</div>
+      <div class="text-xs text-slate-400" id="kpiDrillMeta">—</div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <div class="text-xs text-slate-400">Range</div>
+      <button class="kpiDrillRange px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm" data-range="7">7D</button>
+      <button class="kpiDrillRange px-3 py-2 rounded-xl bg-indigo-600 text-sm font-semibold" data-range="14">14D</button>
+      <button class="kpiDrillRange px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm" data-range="30">30D</button>
+      <button id="kpiDrillClose" class="ml-2 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm">Close</button>
+    </div>
+  </div>
+
+  <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="bg-slate-950 border border-slate-800 rounded-2xl p-4">
+      <div class="text-sm font-semibold">Value Trend</div>
+      <div class="text-xs text-slate-400 mt-1">Daily values for the selected KPI</div>
+      <div class="mt-3">
+        <canvas id="kpiTrendChart" height="220"></canvas>
+      </div>
+    </div>
+
+    <div class="bg-slate-950 border border-slate-800 rounded-2xl p-4">
+      <div class="text-sm font-semibold">Change Trend</div>
+      <div class="text-xs text-slate-400 mt-1">Day-to-day change (momentum)</div>
+      <div class="mt-3">
+        <canvas id="kpiChangeChart" height="220"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+
       <!-- Vendor action center -->
       <div id="vendorOptions" class="hidden bg-slate-900/50 border border-slate-800 rounded-2xl p-4 mb-5">
         <div class="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
@@ -458,6 +495,13 @@ let lastFetchedData = null;
 
 let vendorHistoryCache = new Map();
 let activeVendorName = "";
+
+  // ✅ KPI Funnel Drilldown
+let kpiDrillMetric = "Reg Users";
+let kpiDrillDays = 14;
+let kpiTrendChartInstance = null;
+let kpiChangeChartInstance = null;
+
 
 /** vendor chips */
 const VENDOR_STATUSES = ["All","Dangerous","Risky","Normal","Healthy"];
@@ -989,20 +1033,50 @@ function renderTable(headers, rows) {
 /** =========================================================
  * KPI FUNNEL (Daily + Vendor) ✅ FIXED
  * ========================================================= */
-function funnelCard(title, value, sub="") {
+function funnelCard(title, value, sub="", metricKey=null) {
+  // metricKey is used only for DAILY KPI funnel drilldown
+  const asBtn = !!metricKey && currentDataset === "daily" && dailyView === "snapshot";
+  const baseCls = "bg-slate-900/60 border border-slate-800 rounded-2xl p-4";
+  const hover = asBtn ? " hover:bg-slate-800/30 transition cursor-pointer" : "";
+
+  if (!asBtn) {
+    return `
+      <div class="${baseCls}">
+        <div class="text-xs text-slate-400">${title}</div>
+        <div class="mt-1 text-lg font-semibold">${value ?? "—"}</div>
+        ${sub ? `<div class="mt-1 text-[11px] text-slate-500">${sub}</div>` : ``}
+      </div>
+    `;
+  }
+
   return `
-    <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
+    <button class="${baseCls}${hover} kpiFunnelBtn" data-metric="${metricKey}">
       <div class="text-xs text-slate-400">${title}</div>
       <div class="mt-1 text-lg font-semibold">${value ?? "—"}</div>
       ${sub ? `<div class="mt-1 text-[11px] text-slate-500">${sub}</div>` : ``}
-    </div>
+      <div class="mt-2 text-[11px] text-slate-500">Click to view trend</div>
+    </button>
   `;
 }
+
 function renderFunnelCards(items){
   const wrap = document.getElementById("funnelCards");
   if (!wrap) return;
-  wrap.innerHTML = (items || []).map(x => funnelCard(x.label, x.value, x.sub)).join("");
+
+  wrap.innerHTML = (items || [])
+    .map(x => funnelCard(x.label, x.value, x.sub, x.metricKey || null))
+    .join("");
+
+  // attach click events (daily snapshot only)
+  wrap.querySelectorAll(".kpiFunnelBtn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const metric = btn.dataset.metric;
+      if (!metric) return;
+      openKpiDrill(metric);
+    });
+  });
 }
+
 
 function renderFunnel(allRows, selectedDate, brandKey) {
   const wrap = document.getElementById("funnelCards");
@@ -1033,13 +1107,14 @@ function renderFunnel(allRows, selectedDate, brandKey) {
     const tx = dep ? trn / dep : 0;
     const margin = trn ? (win / trn) * 100 : 0;
 
-    renderFunnelCards([
-      { label:"Reg Users", value: fmtNumber(reg), sub:"Traffic" },
-      { label:"1st Depositors", value: fmtNumber(fd), sub:`Conv: ${conv.toFixed(2)}%` },
-      { label:"Deposit", value: fmtMoney(dep), sub: fd ? `Avg/FD: ${fmtMoney(depPerFD)}` : "" },
-      { label:"Turnover", value: fmtMoney(trn), sub: dep ? `Turnover x: ${tx.toFixed(3)}` : "" },
-      { label:"Company Win", value: fmtMoney(win), sub: trn ? `Margin: ${margin.toFixed(2)}%` : "" },
-    ]);
+   renderFunnelCards([
+  { label:"Reg Users", value: fmtNumber(reg), sub:"Traffic", metricKey:"Reg Users" },
+  { label:"1st Depositors", value: fmtNumber(fd), sub:`Conv: ${conv.toFixed(2)}%`, metricKey:"1st Depositors" },
+  { label:"Deposit", value: fmtMoney(dep), sub: fd ? `Avg/FD: ${fmtMoney(depPerFD)}` : "", metricKey:"Deposit" },
+  { label:"Turnover", value: fmtMoney(trn), sub: dep ? `Turnover x: ${tx.toFixed(3)}` : "", metricKey:"Turnover" },
+  { label:"Company Win", value: fmtMoney(win), sub: trn ? `Margin: ${margin.toFixed(2)}%` : "", metricKey:"Company Win" },
+]);
+
     return;
   }
 
