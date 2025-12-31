@@ -1375,6 +1375,139 @@ function renderChartVendor(rows, selectedDate) {
     options: { responsive:true }
   });
 }
+function setKpiDrillRangeButtons(){
+  document.querySelectorAll(".kpiDrillRange").forEach(b=>{
+    const r = Number(b.dataset.range);
+    if (r === kpiDrillDays) b.className = "kpiDrillRange px-3 py-2 rounded-xl bg-indigo-600 text-sm font-semibold";
+    else b.className = "kpiDrillRange px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm";
+  });
+}
+
+function aggDailyValueForDate(allRows, brandKey, date, metric){
+  const dayRows = (allRows || []).filter(r => r.__date === date);
+
+  if (!dayRows.length) return 0;
+
+  // ALL brands => sum metrics from all rows of that date
+  if (brandKey === "ALL") {
+    const reg = dayRows.reduce((a,r)=>a+toNumber(r["Reg Users"]),0);
+    const fd  = dayRows.reduce((a,r)=>a+toNumber(r["1st Depositors"]),0);
+    const dep = dayRows.reduce((a,r)=>a+toNumber(r["Deposit"]),0);
+    const trn = dayRows.reduce((a,r)=>a+toNumber(r["Turnover"]),0);
+    const win = dayRows.reduce((a,r)=>a+toNumber(r["Company Win"]),0);
+
+    if (metric === "Reg Users") return reg;
+    if (metric === "1st Depositors") return fd;
+    if (metric === "Deposit") return dep;
+    if (metric === "Turnover") return trn;
+    if (metric === "Company Win") return win;
+
+    return 0;
+  }
+
+  // single brand
+  const r = dayRows[0] || null;
+  if (!r) return 0;
+
+  if (metric === "Reg Users") return toNumber(r["Reg Users"]);
+  if (metric === "1st Depositors") return toNumber(r["1st Depositors"]);
+  if (metric === "Deposit") return toNumber(r["Deposit"]);
+  if (metric === "Turnover") return toNumber(r["Turnover"]);
+  if (metric === "Company Win") return toNumber(r["Company Win"]);
+
+  return 0;
+}
+
+function kpiMetricFormatter(metric){
+  if (metric === "Reg Users" || metric === "1st Depositors") return (v)=>fmtNumber(v);
+  return (v)=>fmtMoney(v);
+}
+
+function renderKpiDrillCharts(allRows, endDate, brandKey){
+  const wrap = $("kpiDrillWrap");
+  if (!wrap || !endDate) return;
+
+  const endMs = dateToMs(endDate);
+  const startMs = endMs - (kpiDrillDays - 1) * 86400000;
+
+  const dates = [];
+  for (let ms = startMs; ms <= endMs; ms += 86400000) dates.push(msToDate(ms));
+
+  const values = dates.map(d => aggDailyValueForDate(allRows, brandKey, d, kpiDrillMetric));
+  const changes = values.map((v,i)=> i===0 ? 0 : (v - values[i-1]));
+
+  const fmt = kpiMetricFormatter(kpiDrillMetric);
+
+  $("kpiDrillTitle").textContent = `KPI Trend: ${kpiDrillMetric}`;
+  $("kpiDrillMeta").textContent = `Brand: ${brandKey} · End Date: ${endDate} · Range: ${kpiDrillDays} days`;
+
+  // chart 1: values line
+  const ctx1 = $("kpiTrendChart").getContext("2d");
+  if (kpiTrendChartInstance) kpiTrendChartInstance.destroy();
+  kpiTrendChartInstance = new Chart(ctx1, {
+    type: "line",
+    data: {
+      labels: dates,
+      datasets: [{ label: kpiDrillMetric, data: values, tension: 0.25 }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: true },
+        tooltip: {
+          callbacks: {
+            label: (ctx)=> `${ctx.dataset.label}: ${fmt(ctx.raw)}`
+          }
+        }
+      },
+      scales: { x: { ticks: { maxTicksLimit: 6 } } }
+    }
+  });
+
+  // chart 2: changes bar
+  const ctx2 = $("kpiChangeChart").getContext("2d");
+  if (kpiChangeChartInstance) kpiChangeChartInstance.destroy();
+  kpiChangeChartInstance = new Chart(ctx2, {
+    type: "bar",
+    data: {
+      labels: dates,
+      datasets: [{ label: "Day-to-day Change", data: changes }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: true },
+        tooltip: {
+          callbacks: {
+            label: (ctx)=> `Change: ${fmt(ctx.raw)}`
+          }
+        }
+      },
+      scales: { x: { ticks: { maxTicksLimit: 6 } } }
+    }
+  });
+
+  wrap.classList.remove("hidden");
+  setKpiDrillRangeButtons();
+}
+
+function openKpiDrill(metric){
+  // only daily snapshot
+  if (currentDataset !== "daily" || dailyView !== "snapshot") return;
+
+  kpiDrillMetric = metric;
+
+  const brandKey = $("brandSelect").value;
+  const endDate = $("dateSelect").value;
+
+  if (!endDate) return;
+
+  renderKpiDrillCharts(lastFetchedData?.rows || [], endDate, brandKey);
+}
+
+function closeKpiDrill(){
+  $("kpiDrillWrap")?.classList.add("hidden");
+}
 
 /** =========================================================
  * INSIGHTS (Daily KPI)
@@ -2040,6 +2173,20 @@ function initControls() {
 
   $("vendorSort").addEventListener("change", async () => {
     if (currentDataset === "vendor") await refreshFiltersOnly();
+  });
+  // ✅ KPI Drill controls (one-time listeners)
+  if ($("kpiDrillClose")) $("kpiDrillClose").addEventListener("click", closeKpiDrill);
+
+  document.querySelectorAll(".kpiDrillRange").forEach(btn => {
+    btn.addEventListener("click", () => {
+      kpiDrillDays = Number(btn.dataset.range || "14");
+      setKpiDrillRangeButtons();
+
+      // re-render if modal already open and we have data
+      if (lastFetchedData && $("dateSelect")?.value) {
+        renderKpiDrillCharts(lastFetchedData.rows, $("dateSelect").value, $("brandSelect").value);
+      }
+    });
   });
 
   renderVendorChips();
