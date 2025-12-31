@@ -1043,32 +1043,6 @@ function renderFunnel(allRows, selectedDate, brandKey) {
     return;
   }
 
-  // VENDOR FUNNEL
-  if (currentDataset === "vendor") {
-    const dayRows = (allRows || []).filter(r => r.__date === selectedDate);
-
-    const vendors = dayRows.length;
-    const totalPlayers = dayRows.reduce((s,r)=> s + toNumber(r["Players"]), 0);
-    const totalStake   = dayRows.reduce((s,r)=> s + toNumber(r["Stake"]), 0);
-    const totalWL      = dayRows.reduce((s,r)=> s + toNumber(r["Win/Loss"]), 0);
-
-    const dangerous = dayRows.filter(r => String(r["Status"]||"").toLowerCase().includes("danger")).length;
-    const risky     = dayRows.filter(r => String(r["Status"]||"").toLowerCase().includes("risky")).length;
-    const normal    = dayRows.filter(r => String(r["Status"]||"").toLowerCase().includes("normal")).length;
-    const healthy   = dayRows.filter(r => String(r["Status"]||"").toLowerCase().includes("healthy")).length;
-
-    const avgLossPct = vendors ? (dayRows.reduce((s,r)=> s + toNumber(r["Loss %"]), 0) / vendors) : 0;
-
-    renderFunnelCards([
-      { label:"Vendors", value: fmtNumber(vendors), sub:"Selected date" },
-      { label:"Players", value: fmtNumber(totalPlayers), sub:"Sum players" },
-      { label:"Stake", value: fmtMoney(totalStake), sub:"Sum stake" },
-      { label:"Win/Loss", value: fmtMoney(totalWL), sub:`Avg Loss%: ${avgLossPct.toFixed(2)}%` },
-      { label:"Risk Split", value: `${dangerous}/${risky}/${normal}/${healthy}`, sub:"D/R/N/H" },
-    ]);
-    return;
-  }
-
   wrap.innerHTML = "";
 }
 
