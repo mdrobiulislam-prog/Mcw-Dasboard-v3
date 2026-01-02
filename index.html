@@ -322,6 +322,25 @@
             <div class="mt-1 text-sm" id="insightText">—</div>
           </div>
         </div>
+
+        <!-- ✅ NEW: Ops Summary (health + what changed) -->
+        <div id="opsSummary" class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div class="bg-slate-950 border border-slate-800 rounded-2xl p-4">
+            <div class="text-xs text-slate-400">Yesterday Health</div>
+            <div class="mt-2 flex items-center gap-2">
+              <span id="healthPill" class="px-2 py-1 rounded-lg text-xs border bg-slate-900 border-slate-800 text-slate-200">—</span>
+              <span class="text-xs text-slate-500" id="healthHint">—</span>
+            </div>
+          </div>
+
+          <div class="bg-slate-950 border border-slate-800 rounded-2xl p-4 md:col-span-2">
+            <div class="text-xs text-slate-400">What changed since yesterday?</div>
+            <div id="changeList" class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm"></div>
+            <div class="mt-2 text-[11px] text-slate-500">
+              Baseline uses previous 7 days (excluding selected date).
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- ✅ KPI Funnel -->
@@ -330,7 +349,7 @@
         <div id="funnelCards" class="grid grid-cols-1 md:grid-cols-5 gap-3"></div>
       </div>
 
-      <!-- ✅ KPI Drill Panel (1 chart + tables) -->
+      <!-- ✅ KPI Drill Panel (1 chart + table) -->
       <div id="kpiDrillPanel" class="hidden mt-4 bg-slate-950 border border-slate-800 rounded-2xl p-4">
         <div class="flex items-center justify-between gap-3 mb-3">
           <div>
@@ -356,23 +375,7 @@
           <canvas id="kpiDrillChart" height="120"></canvas>
         </div>
 
-        <!-- ✅ NEW: BRAND BREAKDOWN (only when Brand = ALL) -->
-        <div id="kpiBrandBreakSection" class="hidden mt-4 bg-slate-900/40 border border-slate-800 rounded-2xl p-4 overflow-hidden">
-          <div class="flex items-center justify-between mb-2">
-            <div class="text-xs text-slate-400">Brand Breakdown (Selected Date)</div>
-            <div class="text-xs text-slate-500" id="kpiBrandBreakMeta">—</div>
-          </div>
-
-          <div class="overflow-auto rounded-xl border border-slate-800">
-            <table class="min-w-full text-sm" id="kpiBrandBreakTable"></table>
-          </div>
-
-          <div class="mt-2 text-[11px] text-slate-500">
-            Shows each brand value + total for the selected KPI on the selected date.
-          </div>
-        </div>
-
-        <!-- TABLE (Last 10 dates) -->
+        <!-- TABLE -->
         <div class="mt-4 bg-slate-900/40 border border-slate-800 rounded-2xl p-4 overflow-hidden">
           <div class="flex items-center justify-between mb-2">
             <div class="text-xs text-slate-400">Last 10 Dates (Selected KPI)</div>
@@ -517,7 +520,7 @@ let activeVendorName = "";
 
 /** ✅ KPI Drill state (CLEAN - only once) */
 let kpiDrillOpen = false;
-let kpiDrillMetric = null;      // set when user clicks funnel card
+let kpiDrillMetric = null;
 let kpiDrillDays = 14;
 let kpiDrillChartInstance = null;
 
@@ -641,7 +644,6 @@ function showSmartAlerts(alerts, brandKey, dataset, date) {
 
   bar.classList.remove("hidden");
 }
-
 $("smartAlertHide")?.addEventListener("click", ()=> $("smartAlertBar")?.classList.add("hidden"));
 
 /** date helpers */
@@ -652,6 +654,102 @@ function msToDate(ms){
   const mm = String(dt.getMonth()+1).padStart(2,"0");
   const dd = String(dt.getDate()).padStart(2,"0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+/** =========================================================
+ * ✅ NEW: OPS INTELLIGENCE (NO BREAKING)
+ * ========================================================= */
+
+/** thresholds tuned for "yesterday monitoring" */
+const OPS_THRESH = {
+  depositors: { warn: -5, critical: -10 },      // % vs avg
+  conversion: { warn: -3, critical: -6 },       // percentage points vs avg (Conv %)
+  margin:     { warn: -0.7, critical: -1.5 },   // percentage points vs avg (Margin %)
+  bonusPct:   { warn:  1.0, critical:  2.0 },   // percentage points vs avg (Bonus %)
+  tx:         { warn: -0.5, critical: -1.0 }    // absolute vs avg (Turnover x)
+};
+
+function pctChange(curr, base){
+  if (!base) return 0;
+  return ((curr - base) / base) * 100;
+}
+
+function ppChange(curr, base){ // percentage point change
+  return (curr - base);
+}
+
+function pillClass(color){
+  if (color==="green") return "bg-emerald-500/20 border-emerald-500/40 text-emerald-200";
+  if (color==="yellow") return "bg-yellow-500/15 border-yellow-500/40 text-yellow-200";
+  if (color==="red") return "bg-rose-600/15 border-rose-600/40 text-rose-200";
+  return "bg-slate-900 border-slate-800 text-slate-200";
+}
+
+function warnLevel(metric, delta){
+  // delta is: for % metrics -> percentage points, for depositors -> percent, for tx -> abs
+  const t = OPS_THRESH[metric];
+  if (!t) return "ok";
+  if (delta <= t.critical) return "critical";
+  if (delta <= t.warn) return "warn";
+  return "ok";
+}
+
+function formatDelta(metric, d){
+  if (metric==="depositors") return (d>=0? "▲ ":"▼ ") + Math.abs(d).toFixed(1) + "%";
+  if (metric==="conversion" || metric==="margin" || metric==="bonusPct") return (d>=0? "▲ ":"▼ ") + Math.abs(d).toFixed(2) + " pp";
+  if (metric==="tx") return (d>=0? "▲ ":"▼ ") + Math.abs(d).toFixed(3);
+  return (d>=0? "▲ ":"▼ ") + Math.abs(d).toFixed(2);
+}
+
+function buildChangeRow(label, valueText, deltaText, level){
+  const cls =
+    level==="critical" ? "border-rose-600/40 bg-rose-600/10 text-rose-100" :
+    level==="warn" ? "border-orange-600/40 bg-orange-600/10 text-orange-100" :
+    "border-slate-800 bg-slate-900/30 text-slate-200";
+  return `
+    <div class="rounded-xl border px-3 py-2 ${cls}">
+      <div class="flex items-center justify-between gap-3">
+        <div class="text-xs text-slate-400">${label}</div>
+        <div class="text-xs font-semibold">${deltaText}</div>
+      </div>
+      <div class="mt-1 text-sm font-semibold">${valueText}</div>
+    </div>
+  `;
+}
+
+function getHealthStatus(bundle){
+  // bundle: deltas vs 7d avg (key metrics)
+  let risk = 0;
+  const signals = [];
+
+  if (bundle.margin_pp <= OPS_THRESH.margin.critical) { risk += 2; signals.push("Margin drop"); }
+  else if (bundle.margin_pp <= OPS_THRESH.margin.warn) { risk += 1; signals.push("Margin softer"); }
+
+  if (bundle.bonusPct_pp >= OPS_THRESH.bonusPct.critical) { risk += 2; signals.push("Bonus% spike"); }
+  else if (bundle.bonusPct_pp >= OPS_THRESH.bonusPct.warn) { risk += 1; signals.push("Bonus% up"); }
+
+  if (bundle.depositors_pct <= OPS_THRESH.depositors.critical) { risk += 2; signals.push("Depositors down"); }
+  else if (bundle.depositors_pct <= OPS_THRESH.depositors.warn) { risk += 1; signals.push("Depositors soft"); }
+
+  if (bundle.conv_pp <= OPS_THRESH.conversion.critical) { risk += 2; signals.push("Conversion down"); }
+  else if (bundle.conv_pp <= OPS_THRESH.conversion.warn) { risk += 1; signals.push("Conversion soft"); }
+
+  if (bundle.tx_abs <= OPS_THRESH.tx.critical) { risk += 1; signals.push("Turnover x low"); }
+  else if (bundle.tx_abs <= OPS_THRESH.tx.warn) { risk += 0.5; signals.push("Turnover x softer"); }
+
+  if (risk >= 5) return {status:"ACTION NEEDED", color:"red", hint: signals.slice(0,2).join(" · ") || "Multiple risk signals"};
+  if (risk >= 2.5) return {status:"WATCH", color:"yellow", hint: signals.slice(0,2).join(" · ") || "Some risk signals"};
+  return {status:"HEALTHY", color:"green", hint: signals[0] || "Stable vs baseline"};
+}
+
+function buildOpsInsight(flags){
+  // flags derived from yday vs avg and composition
+  if (flags.regUp && flags.depositorsDown) return "Traffic quality issue: registrations up but depositors down. Review traffic sources & landing flow.";
+  if (flags.depositorsUp && flags.depositDown) return "Value quality issue: depositors up but total deposit down. Check low-value traffic & deposit friction.";
+  if (flags.turnoverUp && flags.winDown) return "High turnover with weaker win. Review risky games/vendors, payout patterns, and bonus impact.";
+  if (flags.bonusUp && flags.marginDown) return "Bonus leakage risk: Bonus% increased while margin dropped. Tighten bonus rules and monitor abuse.";
+  if (flags.convDown && flags.depositorsDown) return "Funnel weakening: both conversion and depositors dropped. Investigate payment issues and onboarding.";
+  return "Stable day. No major risk signals detected vs baseline.";
 }
 
 /** =========================================================
@@ -1041,15 +1139,16 @@ function renderTable(headers, rows) {
 
 /** =========================================================
  * KPI FUNNEL (Daily) - clickable cards -> KPI drill
+ * + ✅ NEW: outline highlight by health signals (only adds class)
  * ========================================================= */
-function funnelCard(title, value, sub="", metricKey=null) {
+function funnelCard(title, value, sub="", metricKey=null, extraClass="") {
   const asBtn = !!metricKey && currentDataset === "daily" && dailyView === "snapshot";
   const baseCls = "bg-slate-900/60 border border-slate-800 rounded-2xl p-4";
   const hover = asBtn ? " hover:bg-slate-800/30 transition cursor-pointer" : "";
 
   if (!asBtn) {
     return `
-      <div class="${baseCls}">
+      <div class="${baseCls} ${extraClass}">
         <div class="text-xs text-slate-400">${title}</div>
         <div class="mt-1 text-lg font-semibold">${value ?? "—"}</div>
         ${sub ? `<div class="mt-1 text-[11px] text-slate-500">${sub}</div>` : ``}
@@ -1058,7 +1157,7 @@ function funnelCard(title, value, sub="", metricKey=null) {
   }
 
   return `
-    <button class="${baseCls}${hover} kpiFunnelBtn" data-metric="${metricKey}">
+    <button class="${baseCls}${hover} ${extraClass} kpiFunnelBtn" data-metric="${metricKey}">
       <div class="text-xs text-slate-400">${title}</div>
       <div class="mt-1 text-lg font-semibold">${value ?? "—"}</div>
       ${sub ? `<div class="mt-1 text-[11px] text-slate-500">${sub}</div>` : ``}
@@ -1072,7 +1171,7 @@ function renderFunnelCards(items){
   if (!wrap) return;
 
   wrap.innerHTML = (items || [])
-    .map(x => funnelCard(x.label, x.value, x.sub, x.metricKey || null))
+    .map(x => funnelCard(x.label, x.value, x.sub, x.metricKey || null, x.extraClass || ""))
     .join("");
 
   wrap.querySelectorAll(".kpiFunnelBtn").forEach(btn => {
@@ -1103,41 +1202,186 @@ function calcDailyRowAggregate(rows) {
   };
 }
 
-function renderFunnel(allRows, selectedDate, brandKey) {
-  const wrap = document.getElementById("funnelCards");
-  if (!wrap) return;
-  if (!selectedDate) { wrap.innerHTML = ""; return; }
+/** ✅ NEW: baseline helpers (previous 7 days excluding selected date) */
+function getPrevDates(endDate, n=7){
+  const end = dateToMs(endDate);
+  const out = [];
+  for (let i=1;i<=n;i++){
+    out.push(msToDate(end - i*86400000));
+  }
+  return out;
+}
 
-  if (currentDataset !== "daily") { wrap.innerHTML = ""; return; }
-
-  const dayRows = (allRows || []).filter(r => r.__date === selectedDate);
-
-  let reg = 0, fd = 0, dep = 0, trn = 0, win = 0;
+function aggDailyValueForDate(allRows, brandKey, date, metric){
+  const dayRows = (allRows || []).filter(r => r.__date === date);
+  if (!dayRows.length) return 0;
 
   if (brandKey === "ALL") {
-    const agg = calcDailyRowAggregate(dayRows);
-    reg = agg.reg; fd = agg.fd; dep = agg.dep; trn = agg.trn; win = agg.win;
-  } else {
-    const r = dayRows[0] || null;
-    reg = r ? toNumber(r["Reg Users"]) : 0;
-    fd  = r ? toNumber(r["1st Depositors"]) : 0;
-    dep = r ? toNumber(r["Deposit"]) : 0;
-    trn = r ? toNumber(r["Turnover"]) : 0;
-    win = r ? toNumber(r["Company Win"]) : 0;
+    if (metric === "Reg Users") return dayRows.reduce((a,r)=>a+toNumber(r["Reg Users"]),0);
+    if (metric === "1st Depositors") return dayRows.reduce((a,r)=>a+toNumber(r["1st Depositors"]),0);
+    if (metric === "Deposit") return dayRows.reduce((a,r)=>a+toNumber(r["Deposit"]),0);
+    if (metric === "Turnover") return dayRows.reduce((a,r)=>a+toNumber(r["Turnover"]),0);
+    if (metric === "Company Win") return dayRows.reduce((a,r)=>a+toNumber(r["Company Win"]),0);
+
+    // derived metrics for ALL
+    if (metric === "Conv %") {
+      const reg = dayRows.reduce((a,r)=>a+toNumber(r["Reg Users"]),0);
+      const fd  = dayRows.reduce((a,r)=>a+toNumber(r["1st Depositors"]),0);
+      return safeDiv(fd, reg) * 100;
+    }
+    if (metric === "Margin %") {
+      const win = dayRows.reduce((a,r)=>a+toNumber(r["Company Win"]),0);
+      const trn = dayRows.reduce((a,r)=>a+toNumber(r["Turnover"]),0);
+      return safeDiv(win, trn) * 100;
+    }
+    if (metric === "Bonus %") {
+      const bns = dayRows.reduce((a,r)=>a+toNumber(r["Bonus"]),0);
+      const dep = dayRows.reduce((a,r)=>a+toNumber(r["Deposit"]),0);
+      return safeDiv(bns, dep) * 100;
+    }
+    if (metric === "Turnover x") {
+      const trn = dayRows.reduce((a,r)=>a+toNumber(r["Turnover"]),0);
+      const dep = dayRows.reduce((a,r)=>a+toNumber(r["Deposit"]),0);
+      return safeDiv(trn, dep);
+    }
+    return 0;
   }
 
-  const conv = reg ? (fd / reg) * 100 : 0;
-  const depPerFD = fd ? dep / fd : 0;
-  const tx = dep ? trn / dep : 0;
-  const margin = trn ? (win / trn) * 100 : 0;
+  const r = dayRows[0] || null;
+  if (!r) return 0;
+  if (metric === "Reg Users") return toNumber(r["Reg Users"]);
+  if (metric === "1st Depositors") return toNumber(r["1st Depositors"]);
+  if (metric === "Deposit") return toNumber(r["Deposit"]);
+  if (metric === "Turnover") return toNumber(r["Turnover"]);
+  if (metric === "Company Win") return toNumber(r["Company Win"]);
+  if (metric === "Conv %") return toNumber(r["Conv %"]);
+  if (metric === "Margin %") return toNumber(r["Margin %"]);
+  if (metric === "Bonus %") return toNumber(r["Bonus %"]);
+  if (metric === "Turnover x") return toNumber(r["Turnover x"]);
+  return 0;
+}
 
-  renderFunnelCards([
-    { label:"Reg Users", value: fmtNumber(reg), sub:"Traffic", metricKey:"Reg Users" },
-    { label:"1st Depositors", value: fmtNumber(fd), sub:`Conv: ${conv.toFixed(2)}%`, metricKey:"1st Depositors" },
-    { label:"Deposit", value: fmtMoney(dep), sub: fd ? `Avg/FD: ${fmtMoney(depPerFD)}` : "", metricKey:"Deposit" },
-    { label:"Turnover", value: fmtMoney(trn), sub: dep ? `Turnover x: ${tx.toFixed(3)}` : "", metricKey:"Turnover" },
-    { label:"Company Win", value: fmtMoney(win), sub: trn ? `Margin: ${margin.toFixed(2)}%` : "", metricKey:"Company Win" },
-  ]);
+function avgOverPrevDays(allRows, brandKey, endDate, metric, n=7){
+  const dates = getPrevDates(endDate, n);
+  const vals = dates.map(d => aggDailyValueForDate(allRows, brandKey, d, metric)).filter(v => Number.isFinite(v));
+  if (!vals.length) return 0;
+  return vals.reduce((a,b)=>a+b,0) / vals.length;
+}
+
+/** ✅ NEW: Ops summary render */
+function renderOpsSummary(allRows, selectedDate, brandKey){
+  // Only show in Daily Snapshot (your use case)
+  if (currentDataset !== "daily" || dailyView !== "snapshot" || !selectedDate){
+    $("opsSummary")?.classList.add("hidden");
+    return;
+  }
+  $("opsSummary")?.classList.remove("hidden");
+
+  const yDate = msToDate(dateToMs(selectedDate) - 86400000);
+
+  // current values
+  const cur = {
+    reg: aggDailyValueForDate(allRows, brandKey, selectedDate, "Reg Users"),
+    fd:  aggDailyValueForDate(allRows, brandKey, selectedDate, "1st Depositors"),
+    conv: aggDailyValueForDate(allRows, brandKey, selectedDate, "Conv %"),
+    dep: aggDailyValueForDate(allRows, brandKey, selectedDate, "Deposit"),
+    trn: aggDailyValueForDate(allRows, brandKey, selectedDate, "Turnover"),
+    win: aggDailyValueForDate(allRows, brandKey, selectedDate, "Company Win"),
+    margin: aggDailyValueForDate(allRows, brandKey, selectedDate, "Margin %"),
+    bonusPct: aggDailyValueForDate(allRows, brandKey, selectedDate, "Bonus %"),
+    tx: aggDailyValueForDate(allRows, brandKey, selectedDate, "Turnover x")
+  };
+
+  // yesterday values
+  const y = {
+    reg: aggDailyValueForDate(allRows, brandKey, yDate, "Reg Users"),
+    fd:  aggDailyValueForDate(allRows, brandKey, yDate, "1st Depositors"),
+    conv: aggDailyValueForDate(allRows, brandKey, yDate, "Conv %"),
+    dep: aggDailyValueForDate(allRows, brandKey, yDate, "Deposit"),
+    trn: aggDailyValueForDate(allRows, brandKey, yDate, "Turnover"),
+    win: aggDailyValueForDate(allRows, brandKey, yDate, "Company Win"),
+    margin: aggDailyValueForDate(allRows, brandKey, yDate, "Margin %"),
+    bonusPct: aggDailyValueForDate(allRows, brandKey, yDate, "Bonus %"),
+    tx: aggDailyValueForDate(allRows, brandKey, yDate, "Turnover x")
+  };
+
+  // 7d averages (excluding selected date)
+  const avg = {
+    reg: avgOverPrevDays(allRows, brandKey, selectedDate, "Reg Users", 7),
+    fd:  avgOverPrevDays(allRows, brandKey, selectedDate, "1st Depositors", 7),
+    conv: avgOverPrevDays(allRows, brandKey, selectedDate, "Conv %", 7),
+    dep: avgOverPrevDays(allRows, brandKey, selectedDate, "Deposit", 7),
+    trn: avgOverPrevDays(allRows, brandKey, selectedDate, "Turnover", 7),
+    win: avgOverPrevDays(allRows, brandKey, selectedDate, "Company Win", 7),
+    margin: avgOverPrevDays(allRows, brandKey, selectedDate, "Margin %", 7),
+    bonusPct: avgOverPrevDays(allRows, brandKey, selectedDate, "Bonus %", 7),
+    tx: avgOverPrevDays(allRows, brandKey, selectedDate, "Turnover x", 7)
+  };
+
+  // deltas vs 7d avg (for health scoring)
+  const bundle = {
+    depositors_pct: pctChange(cur.fd, avg.fd),
+    conv_pp: ppChange(cur.conv, avg.conv),
+    margin_pp: ppChange(cur.margin, avg.margin),
+    bonusPct_pp: ppChange(cur.bonusPct, avg.bonusPct),
+    tx_abs: (cur.tx - avg.tx)
+  };
+
+  const health = getHealthStatus(bundle);
+  $("healthPill").textContent = health.status;
+  $("healthPill").className = `px-2 py-1 rounded-lg text-xs border ${pillClass(health.color)}`;
+  $("healthHint").textContent = health.hint || "—";
+
+  // what changed since yesterday (use deltas vs yesterday)
+  const depositorsPctY = pctChange(cur.fd, y.fd);
+  const convPpY = ppChange(cur.conv, y.conv);
+  const marginPpY = ppChange(cur.margin, y.margin);
+  const bonusPpY = ppChange(cur.bonusPct, y.bonusPct);
+  const txAbsY = (cur.tx - y.tx);
+
+  // levels based on vs avg (more stable), but show yday deltas (more actionable)
+  const lvlDep = warnLevel("depositors", bundle.depositors_pct);
+  const lvlConv = warnLevel("conversion", bundle.conv_pp);
+  const lvlMargin = warnLevel("margin", bundle.margin_pp);
+  const lvlBonus = (bundle.bonusPct_pp >= OPS_THRESH.bonusPct.critical) ? "critical" : (bundle.bonusPct_pp >= OPS_THRESH.bonusPct.warn ? "warn" : "ok");
+  const lvlTx = warnLevel("tx", bundle.tx_abs);
+
+  const changeHTML = []
+    .concat(buildChangeRow("1st Depositors", fmtNumber(cur.fd), formatDelta("depositors", depositorsPctY), lvlDep))
+    .concat(buildChangeRow("Conversion", fmtPct(cur.conv), formatDelta("conversion", convPpY), lvlConv))
+    .concat(buildChangeRow("Margin", fmtPct(cur.margin), formatDelta("margin", marginPpY), lvlMargin))
+    .concat(buildChangeRow("Bonus %", fmtPct(cur.bonusPct), (bonusPpY>=0? "▲ ":"▼ ")+Math.abs(bonusPpY).toFixed(2)+" pp", lvlBonus))
+    .concat(buildChangeRow("Turnover x", Number(cur.tx||0).toFixed(3), (txAbsY>=0? "▲ ":"▼ ")+Math.abs(txAbsY).toFixed(3), lvlTx))
+    .concat(buildChangeRow("Deposit", fmtMoney(cur.dep), (pctChange(cur.dep, y.dep)>=0? "▲ ":"▼ ")+Math.abs(pctChange(cur.dep, y.dep)).toFixed(1)+"%", "ok"));
+
+  $("changeList").innerHTML = changeHTML.join("");
+
+  // build smarter insight into existing insightText (keeps your layout)
+  const flags = {
+    regUp: cur.reg > y.reg,
+    depositorsDown: cur.fd < y.fd,
+    depositorsUp: cur.fd > y.fd,
+    depositDown: cur.dep < y.dep,
+    turnoverUp: cur.trn > y.trn,
+    winDown: cur.win < y.win,
+    bonusUp: cur.bonusPct > y.bonusPct,
+    marginDown: cur.margin < y.margin,
+    convDown: cur.conv < y.conv
+  };
+
+  // Only replace insightText if your computeDailyInsights already ran (we keep it),
+  // but if it didn't, we still provide one.
+  const newInsight = buildOpsInsight(flags);
+  if ($("insightText") && $("insightText").textContent && $("insightText").textContent.trim() !== "—") {
+    // Keep yours if it's already good; only override when we detect risk.
+    const shouldOverride = (health.status !== "HEALTHY");
+    if (shouldOverride) $("insightText").textContent = newInsight;
+  } else {
+    $("insightText").textContent = newInsight;
+  }
+
+  // store for funnel highlighting (used below)
+  return { avg, cur, bundle, health };
 }
 
 /** =========================================================
@@ -1160,52 +1404,15 @@ function getLastDates(allRows, endDate, days){
   return dates.filter(d => d <= endDate).slice(-days);
 }
 
-function aggDailyValueForDate(allRows, brandKey, date, metric){
-  const dayRows = (allRows || []).filter(r => r.__date === date);
-  if (!dayRows.length) return 0;
-
-  if (brandKey === "ALL") {
-    if (metric === "Reg Users") return dayRows.reduce((a,r)=>a+toNumber(r["Reg Users"]),0);
-    if (metric === "1st Depositors") return dayRows.reduce((a,r)=>a+toNumber(r["1st Depositors"]),0);
-    if (metric === "Deposit") return dayRows.reduce((a,r)=>a+toNumber(r["Deposit"]),0);
-    if (metric === "Turnover") return dayRows.reduce((a,r)=>a+toNumber(r["Turnover"]),0);
-    if (metric === "Company Win") return dayRows.reduce((a,r)=>a+toNumber(r["Company Win"]),0);
-    return 0;
-  }
-
-  const r = dayRows[0] || null;
-  if (!r) return 0;
-  if (metric === "Reg Users") return toNumber(r["Reg Users"]);
-  if (metric === "1st Depositors") return toNumber(r["1st Depositors"]);
-  if (metric === "Deposit") return toNumber(r["Deposit"]);
-  if (metric === "Turnover") return toNumber(r["Turnover"]);
-  if (metric === "Company Win") return toNumber(r["Company Win"]);
-  return 0;
-}
-
-/** ✅ NEW: brand breakdown helper for ALL (selected date) */
-function aggBrandBreakdownForDate(allRows, date, metric){
-  const out = BRANDS.map(b => {
-    const r = (allRows || []).find(x => x.__date === date && String(x["Brand"]||"").trim() === b.key) || null;
-    const v = r ? aggDailyValueForDate([r], b.key, date, metric) : 0;
-    return { brand: b.key, val: v };
-  });
-  const total = out.reduce((a,x)=>a+x.val,0);
-  return { rows: out, total };
-}
-
 function closeKpiDrill(){
   kpiDrillOpen = false;
   kpiDrillMetric = null;
   $("kpiDrillPanel")?.classList.add("hidden");
-  // ✅ also hide breakdown section
-  $("kpiBrandBreakSection")?.classList.add("hidden");
 }
 
 function toggleKpiDrill(metric){
   if (currentDataset !== "daily" || dailyView !== "snapshot") return;
 
-  // toggle off if same metric
   if (kpiDrillOpen && kpiDrillMetric === metric) {
     closeKpiDrill();
     return;
@@ -1240,51 +1447,15 @@ function renderKpiDrill(allRows, selectedDate, brandKey){
     options: { responsive: true, plugins: { legend: { display: true } }, scales: { x: { ticks: { maxTicksLimit: 6 } } } }
   });
 
-  const fmtVal = (v) => {
-    if (kpiDrillMetric === "Deposit" || kpiDrillMetric === "Turnover" || kpiDrillMetric === "Company Win") return fmtMoney(v);
-    return fmtNumber(v);
-  };
-
-  /** ✅ NEW: show brand breakdown only when ALL selected */
-  const breakWrap = $("kpiBrandBreakSection");
-  const breakTable = $("kpiBrandBreakTable");
-  const breakMeta = $("kpiBrandBreakMeta");
-
-  if (brandKey === "ALL") {
-    const br = aggBrandBreakdownForDate(allRows, selectedDate, kpiDrillMetric);
-
-    breakMeta.textContent = `${BRANDS.length} brands · Total: ${fmtVal(br.total)}`;
-
-    breakTable.innerHTML = `
-      <thead class="bg-slate-950 sticky top-0">
-        <tr>
-          <th class="text-left px-3 py-2 border-b border-slate-800 text-xs text-slate-300">Brand</th>
-          <th class="text-left px-3 py-2 border-b border-slate-800 text-xs text-slate-300">${kpiDrillMetric}</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${br.rows.map(x => `
-          <tr class="odd:bg-slate-950/40 hover:bg-slate-800/30">
-            <td class="px-3 py-2 border-b border-slate-900 font-semibold">${x.brand}</td>
-            <td class="px-3 py-2 border-b border-slate-900 whitespace-nowrap">${fmtVal(x.val)}</td>
-          </tr>
-        `).join("")}
-        <tr class="bg-slate-950/60">
-          <td class="px-3 py-2 border-t border-slate-800 font-semibold">TOTAL</td>
-          <td class="px-3 py-2 border-t border-slate-800 font-semibold whitespace-nowrap">${fmtVal(br.total)}</td>
-        </tr>
-      </tbody>
-    `;
-    breakWrap.classList.remove("hidden");
-  } else {
-    breakWrap.classList.add("hidden");
-  }
-
-  // table last 10 dates (keep exactly your logic)
   const last10 = getLastDates(allRows, selectedDate, 10);
   const rows = last10.map(d => ({ date: d, val: aggDailyValueForDate(allRows, brandKey, d, kpiDrillMetric) }));
 
   $("kpiDrillTableMeta").textContent = `${rows.length} rows`;
+
+  const fmtVal = (v) => {
+    if (kpiDrillMetric === "Deposit" || kpiDrillMetric === "Turnover" || kpiDrillMetric === "Company Win") return fmtMoney(v);
+    return fmtNumber(v);
+  };
 
   $("kpiDrillTable").innerHTML = `
     <thead class="bg-slate-950 sticky top-0">
@@ -1535,9 +1706,7 @@ function renderChartVendor(rows, selectedDate) {
     type: "doughnut",
     data: {
       labels: ["Dangerous","Risky","Normal","Healthy"],
-      datasets: [{
-        data: [dangerous, risky, normal, healthy],
-      }]
+      datasets: [{ data: [dangerous, risky, normal, healthy] }]
     },
     options: { responsive:true }
   });
@@ -1603,6 +1772,7 @@ function computeDailyInsights(allRows, selectedDate, brandKey) {
   $("deltaYesterday").textContent = deltaText(currVal, yVal, (x)=>fmt(x));
   $("delta7avg").textContent = deltaText(currVal, avgBase, (x)=>fmt(x));
 
+  // keep your original insight, but ops layer may override if risk
   let insight = "—";
   if (brandKey === "ALL") {
     const agg = calcDailyRowAggregate(dayRows);
@@ -1697,6 +1867,27 @@ function renderTopVendors(dayRows) {
   `;
 }
 
+/** ✅ NEW: brand risk tag (for scoreboard only) */
+function brandRiskTag(r, avgMap){
+  // avgMap: { [brand]: { margin, bonusPct, fd } } baseline from prev 7 days
+  const brand = r["Brand"];
+  const base = avgMap?.[brand] || null;
+  if (!base) return `<span class="px-2 py-0.5 rounded-lg text-[10px] bg-slate-800 border border-slate-700 text-slate-200">—</span>`;
+
+  const curMargin = toNumber(r["Margin %"]);
+  const curBonus = toNumber(r["Bonus %"]);
+  const curFd = toNumber(r["1st Depositors"]);
+
+  let score = 0;
+  if ((curMargin - base.margin) <= OPS_THRESH.margin.warn) score++;
+  if ((curBonus - base.bonusPct) >= OPS_THRESH.bonusPct.warn) score++;
+  if (pctChange(curFd, base.fd) <= OPS_THRESH.depositors.warn) score++;
+
+  if (score >= 3) return `<span class="px-2 py-0.5 rounded-lg text-[10px] bg-rose-600/15 border border-rose-600/40 text-rose-200">ACTION</span>`;
+  if (score === 2) return `<span class="px-2 py-0.5 rounded-lg text-[10px] bg-yellow-500/15 border border-yellow-500/40 text-yellow-200">MONITOR</span>`;
+  return `<span class="px-2 py-0.5 rounded-lg text-[10px] bg-emerald-500/15 border border-emerald-500/40 text-emerald-200">OK</span>`;
+}
+
 function renderScoreboard(allRows, selectedDate){
   const wrap = $("scoreboardWrap");
   const table = $("scoreboardTable");
@@ -1711,6 +1902,17 @@ function renderScoreboard(allRows, selectedDate){
   const map = new Map();
   dayRows.forEach(r => { if (!map.has(r["Brand"])) map.set(r["Brand"], r); });
   const rows = [...map.values()];
+
+  // baseline avg per brand (prev 7 days) for risk tag
+  const avgMap = {};
+  for (const b of BRANDS){
+    const brand = b.key;
+    avgMap[brand] = {
+      margin: avgOverPrevDays(allRows, brand, selectedDate, "Margin %", 7), // note: works for single brand only if data contains that brand
+      bonusPct: avgOverPrevDays(allRows, brand, selectedDate, "Bonus %", 7),
+      fd: avgOverPrevDays(allRows, brand, selectedDate, "1st Depositors", 7),
+    };
+  }
 
   const metrics = [
     { key:"Deposit", label:"Deposit", type:"money", get:(r)=>toNumber(r["Deposit"]) },
@@ -1734,7 +1936,8 @@ function renderScoreboard(allRows, selectedDate){
 
   rows.sort((a,b)=>toNumber(b["Deposit"])-toNumber(a["Deposit"]));
 
-  const headers = ["Brand","Reg Users","1st Depositors","Conv %", ...metrics.map(m=>m.label)];
+  // ✅ add Risk column (safe add – scoreboard only)
+  const headers = ["Risk","Brand","Reg Users","1st Depositors","Conv %", ...metrics.map(m=>m.label)];
   table.innerHTML = `
     <thead class="bg-slate-950 sticky top-0">
       <tr>${headers.map(h=>`<th class="text-left px-3 py-2 border-b border-slate-800 text-xs text-slate-300">${h}</th>`).join("")}</tr>
@@ -1755,6 +1958,7 @@ function renderScoreboard(allRows, selectedDate){
 
         return `
           <tr class="odd:bg-slate-950/40 hover:bg-slate-800/30">
+            <td class="px-3 py-2 border-b border-slate-900 whitespace-nowrap">${brandRiskTag(r, avgMap)}</td>
             <td class="px-3 py-2 border-b border-slate-900 font-semibold">${brand}</td>
             <td class="px-3 py-2 border-b border-slate-900">${r["Reg Users"]||"—"}</td>
             <td class="px-3 py-2 border-b border-slate-900">${r["1st Depositors"]||"—"}</td>
@@ -1770,6 +1974,9 @@ function renderScoreboard(allRows, selectedDate){
   wrap.classList.remove("hidden");
 }
 
+/** =========================================================
+ * FILTERS + RENDER (kept same behavior)
+ * ========================================================= */
 async function refreshFiltersOnly(){
   if (!lastFetchedData) return;
   const { headers, rows, brandKey, dataset } = lastFetchedData;
@@ -1808,10 +2015,15 @@ async function refreshFiltersOnly(){
   $("activeMeta").textContent = `Brand: ${brandKey} · Dataset: ${dataset.toUpperCase()} · Date: ${date || "All"}`;
   $("metaInfo").textContent = `${brandKey} · ${dataset.toUpperCase()} · ${date || "All dates"}`;
 
-  renderCards(rows, date, brandKey);
+  // ✅ OPS summary (lightweight, computed in JS)
+  let ops = null;
+  if (dataset === "daily" && date) ops = renderOpsSummary(rows, date, brandKey);
+
+  renderCards(rows, date, brandKey, ops);
   renderMainChart(rows, date, brandKey);
   renderTable(headers, filteredRows);
-  renderFunnel(rows, date, brandKey);
+
+  renderFunnel(rows, date, brandKey, ops);
 
   if (dataset === "vendor" && date) {
     const dayRows = rows.filter(r => r.__date === date);
@@ -1822,7 +2034,6 @@ async function refreshFiltersOnly(){
 
   if (dataset === "daily" && date) computeDailyInsights(rows, date, brandKey);
 
-  // ✅ if drill is open, refresh it on date change
   if (kpiDrillOpen && dataset === "daily" && date) {
     renderKpiDrill(rows, date, brandKey);
   }
@@ -1843,7 +2054,7 @@ function vendorCardWrap(title, value, statusKey) {
   `;
 }
 
-function renderCards(rows, selectedDate, brandKey) {
+function renderCards(rows, selectedDate, brandKey, ops=null) {
   const cards = [];
 
   if (!selectedDate) {
@@ -1867,6 +2078,11 @@ function renderCards(rows, selectedDate, brandKey) {
       : "Daily KPI Rows (Filtered)";
 
     const dayRows = rows.filter(r => r.__date === selectedDate);
+
+    // ✅ optional highlight class for risk days (only visual)
+    const health = ops?.health?.status || "";
+    const riskRing = (health==="ACTION NEEDED") ? "ring-2 ring-rose-500/60" :
+                     (health==="WATCH") ? "ring-2 ring-orange-500/50" : "";
 
     if (brandKey === "ALL") {
       const agg = calcDailyRowAggregate(dayRows);
@@ -1892,7 +2108,7 @@ function renderCards(rows, selectedDate, brandKey) {
       ];
 
       items.forEach(([k,v]) => cards.push(`
-        <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
+        <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 ${riskRing}">
           <div class="text-xs text-slate-400">${k}</div>
           <div class="mt-1 text-lg font-semibold">${v ?? "—"}</div>
         </div>
@@ -1915,7 +2131,7 @@ function renderCards(rows, selectedDate, brandKey) {
         ["Alert", row ? (row["Alert"] || "—") : "—"],
       ];
       items.forEach(([k,v]) => cards.push(`
-        <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
+        <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 ${riskRing}">
           <div class="text-xs text-slate-400">${k}</div>
           <div class="mt-1 text-lg font-semibold">${v ?? "—"}</div>
         </div>
@@ -1970,6 +2186,65 @@ function renderMainChart(rows, selectedDate, brandKey) {
 }
 
 /** =========================================================
+ * FUNNEL render + ✅ highlight (per metric)
+ * ========================================================= */
+function renderFunnel(allRows, selectedDate, brandKey, ops=null) {
+  const wrap = document.getElementById("funnelCards");
+  if (!wrap) return;
+  if (!selectedDate) { wrap.innerHTML = ""; return; }
+  if (currentDataset !== "daily") { wrap.innerHTML = ""; return; }
+
+  const dayRows = (allRows || []).filter(r => r.__date === selectedDate);
+
+  let reg = 0, fd = 0, dep = 0, trn = 0, win = 0;
+
+  if (brandKey === "ALL") {
+    const agg = calcDailyRowAggregate(dayRows);
+    reg = agg.reg; fd = agg.fd; dep = agg.dep; trn = agg.trn; win = agg.win;
+  } else {
+    const r = dayRows[0] || null;
+    reg = r ? toNumber(r["Reg Users"]) : 0;
+    fd  = r ? toNumber(r["1st Depositors"]) : 0;
+    dep = r ? toNumber(r["Deposit"]) : 0;
+    trn = r ? toNumber(r["Turnover"]) : 0;
+    win = r ? toNumber(r["Company Win"]) : 0;
+  }
+
+  const conv = reg ? (fd / reg) * 100 : 0;
+  const depPerFD = fd ? dep / fd : 0;
+  const tx = dep ? trn / dep : 0;
+  const margin = trn ? (win / trn) * 100 : 0;
+
+  // ✅ highlight classes by baseline vs 7d avg (only when ops provided)
+  const ringCritical = "ring-2 ring-rose-500/60";
+  const ringWarn = "ring-2 ring-orange-500/50";
+  const ringOk = "";
+
+  let fdCls="", convCls="", marginCls="", bonusCls="", txCls="", regCls="";
+  if (ops?.bundle){
+    fdCls = (warnLevel("depositors", ops.bundle.depositors_pct)==="critical") ? ringCritical :
+            (warnLevel("depositors", ops.bundle.depositors_pct)==="warn") ? ringWarn : ringOk;
+
+    convCls = (warnLevel("conversion", ops.bundle.conv_pp)==="critical") ? ringCritical :
+              (warnLevel("conversion", ops.bundle.conv_pp)==="warn") ? ringWarn : ringOk;
+
+    marginCls = (warnLevel("margin", ops.bundle.margin_pp)==="critical") ? ringCritical :
+                (warnLevel("margin", ops.bundle.margin_pp)==="warn") ? ringWarn : ringOk;
+
+    txCls = (warnLevel("tx", ops.bundle.tx_abs)==="critical") ? ringCritical :
+            (warnLevel("tx", ops.bundle.tx_abs)==="warn") ? ringWarn : ringOk;
+  }
+
+  renderFunnelCards([
+    { label:"Reg Users", value: fmtNumber(reg), sub:"Traffic", metricKey:"Reg Users", extraClass: regCls },
+    { label:"1st Depositors", value: fmtNumber(fd), sub:`Conv: ${conv.toFixed(2)}%`, metricKey:"1st Depositors", extraClass: fdCls },
+    { label:"Deposit", value: fmtMoney(dep), sub: fd ? `Avg/FD: ${fmtMoney(depPerFD)}` : "", metricKey:"Deposit" },
+    { label:"Turnover", value: fmtMoney(trn), sub: dep ? `Turnover x: ${tx.toFixed(3)}` : "", metricKey:"Turnover", extraClass: txCls },
+    { label:"Company Win", value: fmtMoney(win), sub: trn ? `Margin: ${margin.toFixed(2)}%` : "", metricKey:"Company Win", extraClass: marginCls },
+  ]);
+}
+
+/** =========================================================
  * LOAD + RENDER MAIN
  * ========================================================= */
 function updateFunnelVisibility(){
@@ -1977,8 +2252,6 @@ function updateFunnelVisibility(){
   if (!el) return;
   const shouldHide = (currentDataset === "daily" && dailyView === "trend");
   el.classList.toggle("hidden", shouldHide);
-
-  // if funnel hidden, close drill too
   if (shouldHide) closeKpiDrill();
 }
 
@@ -2188,14 +2461,11 @@ function initControls() {
     if (currentDataset === "vendor") await refreshFiltersOnly();
   });
 
-  // ✅ KPI Drill controls
   $("kpiDrillClose")?.addEventListener("click", closeKpiDrill);
-
   document.querySelectorAll(".kpiDrillRange").forEach(btn => {
     btn.addEventListener("click", () => {
       kpiDrillDays = Number(btn.dataset.range || "14");
       setKpiDrillRangeButtons();
-
       if (kpiDrillOpen && lastFetchedData && $("dateSelect")?.value) {
         renderKpiDrill(lastFetchedData.rows, $("dateSelect").value, $("brandSelect").value);
       }
